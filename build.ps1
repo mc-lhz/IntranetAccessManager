@@ -1,57 +1,51 @@
 param(
-    [switch]$Clean
+    [switch]$NoClean
 )
 
-$ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$src = Join-Path $root 'src'
-$dist = Join-Path $root 'dist'
-$assets = Join-Path $root 'assets'
-$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-$fw = Split-Path -Parent $csc
+$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
-if (-not (Test-Path $csc)) {
-    throw "找不到 .NET Framework 4.x 编译器: $csc"
+Write-Host "== 校园网自动登录（Python 版）打包 =="
+Write-Host "Python: $((Get-Command python).Source)"
+
+if (-not (Test-Path "assets\app.ico")) {
+    throw "缺少 assets\app.ico"
 }
-if ($Clean -and (Test-Path $dist)) {
-    Remove-Item -LiteralPath $dist -Recurse -Force
+
+$iconPath = (Resolve-Path "assets\app.ico").Path
+$pyinstallerArgs = @(
+    "-m", "PyInstaller",
+    "--noconfirm",
+    "--onefile",
+    "--windowed",
+    "--name", "CampusNetLogin",
+    "--icon", $iconPath,
+    "--version-file", (Resolve-Path "version_info.txt").Path,
+    "--add-data", "$iconPath;assets",
+    "--hidden-import", "pystray._win32",
+    "--collect-submodules", "pystray",
+    "--distpath", "dist",
+    "--workpath", "build",
+    "--specpath", "build",
+    "main.py"
+)
+if (-not $NoClean) {
+    $pyinstallerArgs = @("-m", "PyInstaller", "--clean") + $pyinstallerArgs[2..($pyinstallerArgs.Count - 1)]
 }
-New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-$sources = Get-ChildItem -LiteralPath $src -Filter '*.cs' | ForEach-Object { $_.FullName }
-$icon = Join-Path $assets 'app.ico'
-$out = Join-Path $dist 'CampusNetLogin.exe'
-
-$refs = @(
-    (Join-Path $fw 'System.dll')
-    (Join-Path $fw 'System.Core.dll')
-    (Join-Path $fw 'System.Drawing.dll')
-    (Join-Path $fw 'System.Windows.Forms.dll')
-    (Join-Path $fw 'System.Web.Extensions.dll')
-    (Join-Path $fw 'System.Security.dll')
-)
-
-$argsList = @(
-    '/nologo'
-    '/target:winexe'
-    '/platform:anycpu'
-    '/optimize+'
-    '/codepage:65001'
-    '/warn:4'
-    '/out:' + $out
-    '/win32icon:' + $icon
-)
-foreach ($r in $refs) { $argsList += '/reference:' + $r }
-$argsList += $sources
-
-Write-Host '正在编译...'
-& $csc @argsList
+& python @pyinstallerArgs
 if ($LASTEXITCODE -ne 0) {
-    throw "编译失败，退出码 $LASTEXITCODE"
-}
-if (-not (Test-Path $out)) {
-    throw "未生成 $out"
+    throw "PyInstaller 打包失败，退出码 $LASTEXITCODE"
 }
 
-$version = (Get-Item $out).VersionInfo.FileVersion
-Write-Host ("编译完成: {0} ({1:N0} bytes)" -f $out, (Get-Item $out).Length)
+$exe = Join-Path $PSScriptRoot "dist\CampusNetLogin.exe"
+if (-not (Test-Path $exe)) {
+    throw "未生成 $exe"
+}
+
+$size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+Write-Host ""
+Write-Host "打包完成: $exe ($size MB)"
+Write-Host "下一步:"
+Write-Host "  1. 双击 dist\CampusNetLogin.exe 首次设置"
+Write-Host "  2. 或运行 dist\CampusNetLogin.exe --diagnose 生成诊断报告"
